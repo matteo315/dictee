@@ -19,6 +19,14 @@ final class Dictator: ObservableObject {
     private var targetApp: NSRunningApplication?
     private var holdTimer: DispatchWorkItem?
     private let recorder = Recorder()
+
+    // Transcription par morceaux pendant qu'on parle : à la fin, il ne reste que la dernière phrase à traiter.
+    private var minuteurMorceaux: Timer?
+    private var coupeA = 0                       // échantillons déjà envoyés à Whisper
+    private var morceaux: Task<String, Never>?   // texte brut des morceaux déjà transcrits, dans l'ordre
+    private var morceauEchoue = false
+    private var seance = 0                       // change à chaque dictée : les résultats d'une dictée annulée sont ignorés
+    private static let parSeconde = 16000
     private var store: Store { Store.shared }
 
     private init() {
@@ -123,11 +131,59 @@ final class Dictator: ObservableObject {
             return false
         }
         levels = Array(repeating: 0, count: levels.count)
+        seance += 1
+        coupeA = 0
+        morceaux = nil
+        morceauEchoue = false
+        minuteurMorceaux?.invalidate()
+        minuteurMorceaux = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.verifierMorceau() }
+        }
         return true
+    }
+
+    /// Toutes les 0,5 s : après 12 s de parole, on envoie ce qui précède la première pause (ou tout, au-delà de 28 s).
+    private func verifierMorceau() {
+        guard phase == .listening else { return }
+        let n = recorder.sampleCount
+        let duree = n - coupeA
+        guard duree >= 12 * Dictator.parSeconde else { return }
+        let fin = recorder.copy((n - Dictator.parSeconde / 2)..<n)   // la dernière demi-seconde
+        if Recorder.isSilent(fin) || duree >= 28 * Dictator.parSeconde {
+            let coupe = n - Dictator.parSeconde / 4                    // au milieu de la pause
+            envoyerMorceau(recorder.copy(coupeA..<coupe))
+            coupeA = coupe
+        }
+    }
+
+    /// Transcrit un morceau à la suite des précédents (un à la fois, le texte d'avant sert d'amorce).
+    private func envoyerMorceau(_ echantillons: [Float]) {
+        let precedent = morceaux
+        let s = seance
+        let lang = store.reglages.language
+        let amorce = store.whisperPrompt
+        morceaux = Task { @MainActor in
+            let avant = await precedent?.value ?? ""
+            guard s == self.seance, !Recorder.isSilent(echantillons) else { return avant }
+            let prompt = avant.isEmpty ? amorce : amorce + " " + String(avant.suffix(200))
+            do {
+                let brut = try await WhisperServer.shared.transcribe(wav: Recorder.wav(echantillons), language: lang, prompt: prompt)
+                let propre = brut.replacingOccurrences(of: #"\s*\n\s*"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if Cleaner.estInvente(propre) { return avant }
+                return avant.isEmpty ? propre : avant + " " + propre
+            } catch {
+                self.morceauEchoue = true
+                return avant
+            }
+        }
     }
 
     private func discard() {
         holdTimer?.cancel()
+        minuteurMorceaux?.invalidate()
+        seance += 1
+        morceaux = nil
         _ = recorder.stop()
         mode = .none
         handsFree = false
@@ -136,6 +192,7 @@ final class Dictator: ObservableObject {
 
     private func finish() {
         holdTimer?.cancel()
+        minuteurMorceaux?.invalidate()
         mode = .none
         handsFree = false
         let samples = recorder.stop()
@@ -145,13 +202,19 @@ final class Dictator: ObservableObject {
             return
         }
         phase = .transcribing
-        let wav = Recorder.wav(samples)
+        // Le dernier morceau (depuis la dernière coupe) rejoint ceux déjà transcrits pendant la dictée.
+        if coupeA < samples.count { envoyerMorceau(Array(samples[coupeA...])) }
+        let tache = morceaux
         let app = targetApp
         let lang = store.reglages.language
         let prompt = store.whisperPrompt
         Task { @MainActor in
             do {
-                let raw = try await WhisperServer.shared.transcribe(wav: wav, language: lang, prompt: prompt)
+                var raw = await tache?.value ?? ""
+                // Si un morceau a échoué, on retranscrit toute la dictée d'un coup (comme avant).
+                if self.morceauEchoue {
+                    raw = try await WhisperServer.shared.transcribe(wav: Recorder.wav(samples), language: lang, prompt: prompt)
+                }
                 guard !cancelled else { return }
                 let text = Cleaner.clean(raw, dictionary: store.dictionary)
                 phase = .idle

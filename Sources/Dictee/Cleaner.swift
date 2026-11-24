@@ -23,12 +23,7 @@ enum Cleaner {
         t = t.replacingOccurrences(of: #"\[[^\]]*\]|\((musique|rires?|applaudissements|bruit)[^)]*\)|\*[^*]*\*"#,
                                    with: "", options: [.regularExpression, .caseInsensitive])
 
-        let norm = t.lowercased().trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
-        if norm.isEmpty || hallucinations.contains(where: {
-            $0.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces)) == norm
-        }) {
-            return ""
-        }
+        if estInvente(t) { return "" }
 
         // Hésitations
         let filler = #"(?i)(?<![\p{L}\p{N}])(bah euh|ben euh|bon euh|euh+|heu+|hum+|hmm+|mmh+)(?![\p{L}\p{N}])[,.…]?\s*"#
@@ -52,6 +47,16 @@ enum Cleaner {
         t = t.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return capitalizeSentences(t)
+    }
+
+    /// Vrai si le texte est vide ou une phrase que Whisper invente sur un silence.
+    static func estInvente(_ texte: String) -> Bool {
+        let t = texte.replacingOccurrences(of: #"\[[^\]]*\]|\((musique|rires?|applaudissements|bruit)[^)]*\)|\*[^*]*\*"#,
+                                           with: "", options: [.regularExpression, .caseInsensitive])
+        let norm = t.lowercased().trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
+        return norm.isEmpty || hallucinations.contains(where: {
+            $0.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces)) == norm
+        })
     }
 
     /// Majuscule en début de texte et après . ? ! …

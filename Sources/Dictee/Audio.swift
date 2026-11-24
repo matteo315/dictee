@@ -50,6 +50,16 @@ final class Recorder {
         DispatchQueue.main.async { [weak self] in self?.onLevel?(rms) }
     }
 
+    /// Nombre d'échantillons enregistrés jusqu'ici (16 000 par seconde).
+    var sampleCount: Int { lock.lock(); defer { lock.unlock() }; return samples.count }
+
+    /// Copie d'un morceau de l'enregistrement en cours, sans l'arrêter.
+    func copy(_ range: Range<Int>) -> [Float] {
+        lock.lock(); defer { lock.unlock() }
+        let r = range.clamped(to: 0..<samples.count)
+        return Array(samples[r])
+    }
+
     func stop() -> [Float] {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

@@ -173,6 +173,7 @@ Termine par un résumé court, en français simple :
     - Juste après l'ouverture, le modèle peut encore se charger : on réessaie 40 fois toutes les 0,5 s.
   - `Cleaner.swift` : le nettoyage décrit plus haut. Les expressions régulières utilisent des limites de mots Unicode (`(?<![\p{L}\p{N}])…(?![\p{L}\p{N}])`).
   - `Dictator.swift` : le chef d'orchestre.
+    - Il transcrit par morceaux pendant qu'on parle : après 12 s de parole, à la première pause d'une demi-seconde (ou au-delà de 28 s sans pause), il envoie le morceau à Whisper, avec la fin du texte précédent comme amorce. À la fin, il ne reste que le dernier morceau à traiter : environ 1 s d'attente, même après 3 minutes de dictée. Si un morceau échoue, il retranscrit tout d'un coup.
     - Étapes : repos → écoute → transcription.
     - Il mémorise l'appli au premier plan au début de la dictée.
     - Il colle, puis ajoute la dictée à l'historique.
