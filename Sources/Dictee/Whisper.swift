@@ -14,6 +14,9 @@ final class WhisperServer {
     func start(model: String, language: String, logDir: URL) {
         stop()
         guard let bin = binary else { return }
+        // Une copie restée d'un lancement précédent (appli arrêtée sans fermer son serveur) garde 1,6 Go
+        // pour rien : plusieurs copies peuvent écouter le même port. On les arrête avant d'en lancer une.
+        arreterLesRestes()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
         p.arguments = ["-m", model, "-l", language, "--host", "127.0.0.1", "--port", "\(port)"]
@@ -29,6 +32,16 @@ final class WhisperServer {
     func stop() {
         process?.terminate()
         process = nil
+    }
+
+    /// Arrête tout serveur Whisper de Dictée (même port) qui tournerait encore, puis attend qu'il soit parti.
+    private func arreterLesRestes() {
+        let k = Process()
+        k.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        k.arguments = ["-f", "whisper-server .*--port \(port)"]
+        try? k.run()
+        k.waitUntilExit()
+        if k.terminationStatus == 0 { Thread.sleep(forTimeInterval: 0.5) }   // 0 = au moins un reste arrêté
     }
 
     var isInstalled: Bool { binary != nil }

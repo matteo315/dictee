@@ -42,6 +42,7 @@ fi
 # Remplacer l'ancienne version
 pkill -x Dictee 2>/dev/null || true
 sleep 0.5
+pkill -f "whisper-server .*--port 8178" 2>/dev/null || true   # pas de serveur Whisper orphelin
 rm -rf "/Applications/Dictée.app"
 cp -R "$APP" "/Applications/Dictée.app"
 echo "Installé : /Applications/Dictée.app"

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var bag = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        fermerServeurSurArret()
         let store = Store.shared
         if let model = store.modelPath {
             WhisperServer.shared.start(model: model, language: store.reglages.language, logDir: store.dir)
@@ -36,6 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         WhisperServer.shared.stop()
+    }
+
+    /// Arrêtée par le système ou par l'installation (signal TERM), l'appli ne passe pas par
+    /// applicationWillTerminate : on ferme quand même le serveur Whisper pour ne pas le laisser orphelin.
+    private var signalArret: DispatchSourceSignal?
+    private func fermerServeurSurArret() {
+        signal(SIGTERM, SIG_IGN)
+        let s = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        s.setEventHandler { WhisperServer.shared.stop(); exit(0) }
+        s.resume()
+        signalArret = s
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
